@@ -5,8 +5,6 @@ account: hydroty
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 13657811
-bundleId: 9736823
+bundleId: 9743521
 url: https://hydroty.shinyapps.io/snotel_plot/
 version: 1
-asMultiple: FALSE
-asStatic: FALSE

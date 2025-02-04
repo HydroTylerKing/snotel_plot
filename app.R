@@ -1,5 +1,5 @@
 # Publish with: 
-# rsconnect::deployApp("C:/Users/tvking/OneDrive/Documents/King/hydroty_code/tvking/snotel_plot")
+# rsconnect::deployApp("C:/Users/hydro/OneDrive/Documents/GitHub/snotel_plot")
 
 library(ggplot2)
 library(dplyr)
@@ -44,6 +44,9 @@ ui <- fluidPage(
           selectInput('start_month_selected','Select Start Month',choices = c('Oct','Nov','Dec','Jan','Feb','Mar','Apr','May','June','July','Aug','Sept'),selected = 'Oct'),
           selectInput('start_date_selected','Select Start Day',choices = 1:31,selected = 1),
           
+          # Prior point
+          sliderInput("prior_point", "Number of hours prior:",min = 0, max = 96,value = 24,step = 3),
+          
           # SWE Range
           uiOutput('swe_range'),
  
@@ -65,8 +68,8 @@ ui <- fluidPage(
            tabsetPanel(
              tabPanel('Annotation plot',plotOutput('snotel_plot')),
              tabPanel('Interactive plot', plotlyOutput('snotel_plotly')),
-             tabPanel('Map', leafletOutput('snotelmap')),
-             tabPanel('Table',DT::dataTableOutput('data_table')))
+             tabPanel('State Map', leafletOutput('snotelmap')),
+             tabPanel('State Table',DT::dataTableOutput('data_table')))
         )
     )
 )
@@ -195,12 +198,13 @@ server <- function(input, output, session) {
         progress$inc(1/nrow(snotel_today), detail = paste0("Site ",i,' of ',nrow(snotel_today)))
         
         baseurl <- paste0("https://wcc.sc.egov.usda.gov/nwcc/view?intervalType=Current+&report=STAND&timeseries=&format=copy&sitenum=",snotel_today$site_id[i],"&current=DAY")
-        
+        # baseurl <- paste0("https://wcc.sc.egov.usda.gov/nwcc/view?intervalType=Current+&report=STAND&timeseries=&format=copy&sitenum=423&current=DAY")
         tmp <- RCurl::getURL(baseurl)
         tmpData <- read.table(textConnection(tmp),header = TRUE, skip = 6, strip.white = T, stringsAsFactors = FALSE,sep = ",",na.strings = c(-99.9))
         if(nrow(tmpData>0)){
           tmpData$X <- NULL
           tmpData$POSIXct <- as.POSIXct(paste(as.character(tmpData$Date),as.character(tmpData$Time), sep = " "),format = "%Y-%m-%d %H:%M",tz = "MST")
+          if(!('WTEQ.I.1..in.' %in% colnames(tmpData))){tmpData$WTEQ.I.1..in. <- NA}
           tmpData <- tmpData[,names(tmpData) %in% c('Site.Id','Date','Time','WTEQ.I.1..in.','PREC.I.1..in.','TOBS.I.1..degC.','SNWD.I.1..in.','POSIXct')]
           tmpData$WTEQ.I.1..in. <- as.numeric(tmpData$WTEQ.I.1..in.)
           tmpData$PREC.I.1..in. <- as.numeric(tmpData$PREC.I.1..in.)
@@ -235,11 +239,11 @@ server <- function(input, output, session) {
             #   tmpData[,col_m][index] <- approx(x = tmpData$POSIXct,y = tmpData[,col_m],xout = tmpData$POSIXct[index],method = 'linear',rule = 2)$y
             # }
           }
-          snotel_today$total_snow_depth[i] <- round(mean(as.numeric(tmpData$SNWD[c(nrow(tmpData)-2,nrow(tmpData))]),na.rm=T),1)
-          snotel_today$change_in_depth_24_hr[i] <- round(mean(as.numeric(tmpData$SNWD[c(nrow(tmpData)-2,nrow(tmpData))]),na.rm=T)-mean(as.numeric(tmpData$SNWD[1:3]),na.rm=T),1)
+          snotel_today$total_snow_depth[i] <- round(max(as.numeric(tmpData$SNWD),na.rm=T),1)
+          snotel_today$change_in_depth_24_hr[i] <- round(max(as.numeric(tmpData$SNWD),na.rm=T)-min(as.numeric(tmpData$SNWD),na.rm=T),1)
         }else{
-          snotel_today$total_snow_depth[i] <- 'No Data'
-          snotel_today$change_in_depth_24_hr[i] <- 'No Data'
+          snotel_today$total_snow_depth[i] <- 0
+          snotel_today$change_in_depth_24_hr[i] <- 0
         }
       }
       snotel_today <- snotel_today[,c('site_name','total_snow_depth','change_in_depth_24_hr','depth_units','latitude','longitude','elev','county')] 
@@ -259,7 +263,7 @@ server <- function(input, output, session) {
         y2 = 32
       }
       
-      depth_gain_24_hour <- round(df_i$SNWD[nrow(df_i)]-df_i$SNWD[nrow(df_i)-24],1)
+      depth_gain_24_hour <- round(df_i$SNWD[nrow(df_i)]-df_i$SNWD[nrow(df_i)-input$prior_point],1)
       
       temp <- ggplot(data = df_i)+
         theme_bw()+
@@ -289,7 +293,7 @@ server <- function(input, output, session) {
         ylab(paste0('Air Temp [',unique(df_i$TOBS_unit),']'))+
         scale_x_datetime(limits = c(min_x,NA),expand = c(0,0),name = 'Date')+
         # scale_y_continuous(expand = c(0,0))+
-        geom_vline(xintercept = max(df_i$POSIXct)-86400,lty=2)+
+        geom_vline(xintercept = max(df_i$POSIXct)-60*60*input$prior_point,lty=2)+
         theme(plot.title = element_text(size = 12))
       
       swe <- ggplot(data = df_i)+
@@ -304,7 +308,7 @@ server <- function(input, output, session) {
         theme_bw()+
         scale_x_datetime(limits = c(min_x,NA),expand = c(0,0),name = 'Date')+
         scale_y_continuous(limits = c(swe_y()[1],swe_y()[2]))+
-        geom_vline(xintercept = max(df_i$POSIXct)-86400,lty=2)+
+        geom_vline(xintercept = max(df_i$POSIXct)-60*60*input$prior_point,lty=2)+
         ylab(paste0('SWE [',unique(df_i$WTEQ_unit),']'))
       
       depth <- ggplot(data = df_i)+
@@ -319,8 +323,8 @@ server <- function(input, output, session) {
                  alpha = 0.1)+
         scale_x_datetime(limits = c(min_x,NA),expand = c(0,0),name = 'Date')+
         scale_y_continuous(limits = c(depth_y()[1],depth_y()[2]))+
-        geom_vline(xintercept = max(df_i$POSIXct)-86400,lty=2)+
-        ggtitle(paste0('Site: ',site_name_i,', 24 hr change: ',depth_gain_24_hour,' [',unique(df_i$SNWD_unit),'], Updated: ',max(df_i$POSIXct)))+
+        geom_vline(xintercept = max(df_i$POSIXct)-60*60*input$prior_point,lty=2)+
+        ggtitle(paste0('Site: ',site_name_i,', ',input$prior_point,' hr change: ',depth_gain_24_hour,' [',unique(df_i$SNWD_unit),'], Updated: ',max(df_i$POSIXct)))+
         ylab(paste0('Depth [',unique(df_i$SNWD_unit),']'))
       
       gridExtra::grid.arrange(depth,swe,temp)
@@ -337,7 +341,7 @@ server <- function(input, output, session) {
       
       site_name_i <- input$site_name_selected
       
-      depth_gain_24_hour <- round(df_i$SNWD[nrow(df_i)]-df_i$SNWD[nrow(df_i)-24],1)
+      depth_gain_24_hour <- round(df_i$SNWD[nrow(df_i)]-df_i$SNWD[nrow(df_i)-input$prior_point],1)
       
       temp <- ggplot(data = df_i)+
         theme_bw()+
