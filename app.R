@@ -8,6 +8,7 @@ library(shiny)
 library(RCurl)
 library(plotly)
 library(leaflet)
+library(lubridate)
 library(sf)
 library(stringr)
 
@@ -37,12 +38,14 @@ ui <- fluidPage(
           # Drop down of Units
           selectInput("units_selected", "Select Units", choices = c('Metric','"Freedom units"'),selected = 'Metric'),
           
-          # Drop down of water years
-          selectInput("water_year_selected", "Select Water Year", choices = c(2023,2024,2025),selected = 2025),
-          
-          # Start date
-          selectInput('start_month_selected','Select Start Month',choices = c('Oct','Nov','Dec','Jan','Feb','Mar','Apr','May','June','July','Aug','Sept'),selected = 'Oct'),
-          selectInput('start_date_selected','Select Start Day',choices = 1:31,selected = 1),
+          # date selector
+          dateInput(
+            inputId = "date",
+            label = "Start Date",
+            value = ifelse(lubridate::month(Sys.Date()) > 9,
+                       paste0(lubridate::year(Sys.Date()),'-10-01'),
+                       paste0(lubridate::year(Sys.Date())-1,'-10-01'))
+          ),
           
           # Prior point
           sliderInput("prior_point", "Number of hours prior:",min = 0, max = 96,value = 24,step = 3),
@@ -113,20 +116,16 @@ server <- function(input, output, session) {
       depth_y <-input$depth_range
     })
     
-    min_x_date <- reactive({months_df <- data.frame('month'=c('Oct','Nov','Dec','Jan','Feb','Mar','Apr','May','June','July','Aug','Sept'),
-                           'number'=c(10,11,12,1,2,3,4,5,6,7,8,9))
-      month_num <- as.numeric(months_df$number[months_df$month == input$start_month_selected])
-      day <- as.integer(input$start_date_selected)
-      if(month_num %in% c(4,6,9,11)){day <- min(day,30)}
-      if(month_num %in% c(2)){day <- min(day,28)}
-      if(month_num > 9){year <- as.integer(input$water_year_selected)-1}else{year <- input$water_year_selected}
-      min_x <- as.POSIXct(paste0(year,'-',month_num,'-',day),format = '%Y-%m-%d')
+    min_x_date <- reactive({
+      min_x <- as.POSIXct(input$date,format = '%Y-%m-%d')
       min_x
     })
     
     data <- reactive({
       site_name_i <- input$site_name_selected
-      wateryear <- input$water_year_selected
+      wateryear <- ifelse(lubridate::month(input$date) > 9,
+                          lubridate::year(input$date)+1,
+                          lubridate::year(input$date))
       site_i <- metadata$site_id[metadata$site_name == site_name_i]
       units <- input$units_selected
       
